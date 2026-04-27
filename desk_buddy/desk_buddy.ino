@@ -9,6 +9,8 @@ const char* password = "Password@123";
 
 WebServer server(80);
 
+#define TOUCH_PIN 4
+
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
@@ -61,6 +63,12 @@ void clearAmbient() {
   roboEyes.setIdleMode(OFF);
   roboEyes.setSweat(false);
 }
+
+// -------- PHYSICAL TOUCH TAP --------
+int           touchTapCount  = 0;
+bool          touchLastState = false;
+unsigned long touchLastTap   = 0;
+#define TOUCH_WINDOW_MS 400
 
 // -------- PET / TOUCH SIM --------
 enum PetAction { PET_NONE, PET_HAPPY, PET_LAUGH, PET_CONFUSED };
@@ -514,6 +522,7 @@ void handleTouch2() {
 // -------- SETUP --------
 
 void setup() {
+  pinMode(TOUCH_PIN, INPUT);
   Wire.begin(21, 22);
   Serial.begin(115200);
 
@@ -564,6 +573,18 @@ void setup() {
 
 void loop() {
   server.handleClient();
+
+  // Physical pat-head tap detection (mirrors 400ms web UI window)
+  bool touchNow = digitalRead(TOUCH_PIN);
+  if (touchNow && !touchLastState) {
+    touchTapCount++;
+    touchLastTap = millis();
+  }
+  touchLastState = touchNow;
+  if (touchTapCount > 0 && millis() - touchLastTap >= TOUCH_WINDOW_MS) {
+    enterPetMode(touchTapCount);
+    touchTapCount = 0;
+  }
 
   if (currentMode == MODE_CLOCK) {
     showTime();
