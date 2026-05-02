@@ -22,6 +22,7 @@ RoboEyes<Adafruit_SSD1306> roboEyes(display);
 enum Mode {
   MODE_AUTO,
   MODE_STATUS,
+  MODE_POMODORO_READY,     // on page, timer not started
   MODE_POMODORO_FOCUS,
   MODE_POMODORO_BREAK,
   MODE_POMODORO_OVERTIME,
@@ -70,8 +71,8 @@ bool          touchLastState = false;
 unsigned long touchLastTap   = 0;
 #define TOUCH_WINDOW_MS 400
 
-// Single-tap cycles through: Clock → Pomodoro → Eyes (auto)
-const Mode TAP_CYCLE[] = { MODE_CLOCK, MODE_POMODORO_FOCUS, MODE_AUTO };
+// Single-tap cycles through: Clock → Pomodoro (ready, not started) → Eyes (auto)
+const Mode TAP_CYCLE[] = { MODE_CLOCK, MODE_POMODORO_READY, MODE_AUTO };
 const int  TAP_CYCLE_LEN = 3;
 int        tapCycleIndex = -1;
 
@@ -82,9 +83,8 @@ void cycleTapMode() {
   if (next == MODE_CLOCK) {
     currentMode = MODE_CLOCK;
     clearAmbient();
-  } else if (next == MODE_POMODORO_FOCUS) {
-    currentMode       = MODE_POMODORO_FOCUS;
-    pomodoroStartTime = millis();
+  } else if (next == MODE_POMODORO_READY) {
+    currentMode = MODE_POMODORO_READY;
     clearAmbient();
     setMoodTracked(ANGRY);
     roboEyes.setPosition(S);
@@ -140,23 +140,57 @@ void restoreFromPet() {
   if (prePetMode == MODE_AUTO) lastAutoMood = -1;
 }
 
+bool inPomodoroMode() {
+  return currentMode == MODE_POMODORO_READY  ||
+         currentMode == MODE_POMODORO_FOCUS  ||
+         currentMode == MODE_POMODORO_BREAK  ||
+         currentMode == MODE_POMODORO_OVERTIME;
+}
+
+bool inEyesMode() {
+  return currentMode == MODE_AUTO || currentMode == MODE_STATUS;
+}
+
 void enterPetMode(int taps) {
   if (currentMode == MODE_PET) return; // ignore taps during active reaction
 
   if (taps == 1) { cycleTapMode(); return; }
 
-  prePetMode    = currentMode;
-  prePetMood    = trackedMood;
-  prePetAmbient = ambientActive;
-  currentMode   = MODE_PET;
-  clearAmbient();
-
   if (taps == 2) {
-    petAction = PET_LAUGH;
-    setMoodTracked(HAPPY);
-    roboEyes.setVFlicker(true, 5);
-    petTimer1 = millis() + 3000;
-  } else {
+    if (inPomodoroMode()) {
+      // Start Pomodoro from ready/any pomodoro state
+      currentMode       = MODE_POMODORO_FOCUS;
+      pomodoroStartTime = millis();
+      clearAmbient();
+      setMoodTracked(ANGRY);
+      roboEyes.setPosition(S);
+      roboEyes.setAutoblinker(ON, 8, 0);
+      Serial.println("[TOUCH] Pomodoro started");
+    } else if (inEyesMode()) {
+      // Laugh reaction
+      prePetMode = currentMode; prePetMood = trackedMood; prePetAmbient = ambientActive;
+      currentMode = MODE_PET; clearAmbient();
+      petAction = PET_LAUGH;
+      setMoodTracked(HAPPY);
+      roboEyes.setVFlicker(true, 5);
+      petTimer1 = millis() + 3000;
+    }
+    return;
+  }
+
+  // 3+ taps
+  if (inPomodoroMode()) {
+    // Reset Pomodoro back to ready state
+    currentMode = MODE_POMODORO_READY;
+    clearAmbient();
+    setMoodTracked(ANGRY);
+    roboEyes.setPosition(S);
+    roboEyes.setAutoblinker(ON, 8, 0);
+    Serial.println("[TOUCH] Pomodoro reset to ready");
+  } else if (inEyesMode()) {
+    // Confused reaction
+    prePetMode = currentMode; prePetMood = trackedMood; prePetAmbient = ambientActive;
+    currentMode = MODE_PET; clearAmbient();
     petAction = PET_CONFUSED;
     petPhase  = 0;
     roboEyes.setHFlicker(true, 20);
@@ -228,9 +262,18 @@ void drawSleepFace() {
 // Draws a small timer strip at the very top of the screen (y=0..9).
 // Called after roboEyes draws to the buffer, before we flush.
 void drawPomOverlay() {
-  if (currentMode != MODE_POMODORO_FOCUS &&
-      currentMode != MODE_POMODORO_BREAK &&
+  if (currentMode != MODE_POMODORO_READY   &&
+      currentMode != MODE_POMODORO_FOCUS   &&
+      currentMode != MODE_POMODORO_BREAK   &&
       currentMode != MODE_POMODORO_OVERTIME) return;
+
+  if (currentMode == MODE_POMODORO_READY) {
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(31, 1);
+    display.printf("FOCUS %02d:%02d", (int)(POMODORO_FOCUS_MS / 60000), (int)((POMODORO_FOCUS_MS % 60000) / 1000));
+    return;
+  }
 
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
