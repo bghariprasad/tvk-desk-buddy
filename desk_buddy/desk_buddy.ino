@@ -70,6 +70,24 @@ bool          touchLastState = false;
 unsigned long touchLastTap   = 0;
 #define TOUCH_WINDOW_MS 400
 
+void handleTouchSensor() {
+  bool touchNow = digitalRead(TOUCH_PIN);
+  if (touchNow && !touchLastState) {
+    touchTapCount++;
+    touchLastTap = millis();
+    Serial.printf("[TOUCH] Rising edge detected — tap #%d\n", touchTapCount);
+  }
+  if (!touchNow && touchLastState) {
+    Serial.println("[TOUCH] Released");
+  }
+  touchLastState = touchNow;
+  if (touchTapCount > 0 && millis() - touchLastTap >= TOUCH_WINDOW_MS) {
+    Serial.printf("[TOUCH] Window closed — firing enterPetMode(%d)\n", touchTapCount);
+    enterPetMode(touchTapCount);
+    touchTapCount = 0;
+  }
+}
+
 // -------- PET / TOUCH SIM --------
 enum PetAction { PET_NONE, PET_HAPPY, PET_LAUGH, PET_CONFUSED };
 PetAction     petAction     = PET_NONE;
@@ -125,7 +143,7 @@ int getTimeBasedMood() {
   int h = timeinfo.tm_hour;
   if (h >= 7  && h < 9)  return TIRED;
   if (h >= 9  && h < 12) return DEFAULT;
-  if (h >= 12 && h < 13) return HAPPY;
+  if (h >= 12 && h < 13) return DEFAULT;
   if (h >= 13 && h < 18) return DEFAULT;
   if (h >= 18 && h < 21) return HAPPY;
   return DEFAULT; // fallback (sleep hours handled separately)
@@ -569,102 +587,109 @@ void setup() {
 }
 
 
+// -------- AUTO SLEEP --------
+
+void handleAutoSleep() {
+  if (currentMode != MODE_AUTO && !(currentMode == MODE_SLEEP && autoSleepActive)) return;
+
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) return;
+
+  int h = timeinfo.tm_hour;
+  bool sleepTime = (h >= 21 || h < 7);
+
+  if (sleepTime && !autoSleepActive) {
+    autoSleepActive = true;
+    currentMode = MODE_SLEEP;
+    clearAmbient();
+  } else if (!sleepTime && autoSleepActive) {
+    autoSleepActive = false;
+    currentMode = MODE_AUTO;
+    lastAutoMood = -1;
+    applyAmbient();
+  }
+}
+
+// -------- PET STATE MACHINE --------
+
+void handlePetStateMachine() {
+  if (currentMode != MODE_PET) return;
+
+  if (petAction == PET_HAPPY) {
+    if (millis() >= petTimer1) restoreFromPet();
+  } else if (petAction == PET_LAUGH) {
+    if (millis() >= petTimer1) { roboEyes.setVFlicker(false); restoreFromPet(); }
+  } else if (petAction == PET_CONFUSED) {
+    if (petPhase == 0 && millis() >= petTimer1) {
+      roboEyes.setHFlicker(false);
+      setMoodTracked(ANGRY);
+      petTimer2 = millis() + 3000;
+      petPhase = 1;
+    } else if (petPhase == 1 && millis() >= petTimer2) {
+      restoreFromPet();
+    }
+  }
+}
+
+// -------- POMODORO STATE MACHINE --------
+
+void handlePomodoroStateMachine() {
+  if (currentMode != MODE_POMODORO_FOCUS &&
+      currentMode != MODE_POMODORO_BREAK  &&
+      currentMode != MODE_POMODORO_OVERTIME) return;
+
+  unsigned long elapsed = millis() - pomodoroStartTime;
+
+  if (currentMode == MODE_POMODORO_FOCUS && elapsed >= POMODORO_FOCUS_MS) {
+    currentMode       = MODE_POMODORO_BREAK;
+    pomodoroStartTime = millis();
+    setMoodTracked(HAPPY);
+    roboEyes.setAutoblinker(ON, 3, 2);
+    roboEyes.anim_laugh();
+  } else if (currentMode == MODE_POMODORO_BREAK && elapsed >= POMODORO_BREAK_MS) {
+    currentMode = MODE_POMODORO_OVERTIME;
+    setMoodTracked(TIRED);
+    roboEyes.setSweat(true);
+  }
+}
+
+// -------- AUTO MOOD REFRESH --------
+
+void handleAutoMood() {
+  if (currentMode != MODE_AUTO) return;
+
+  int mood = getTimeBasedMood();
+  if (mood != lastAutoMood) {
+    setMoodTracked(mood);
+    lastAutoMood = mood;
+  }
+}
+
+// -------- DISPLAY RENDER --------
+
+void handleDisplayRender() {
+  bool timeForFrame = (millis() - roboEyes.fpsTimer >= roboEyes.frameInterval);
+  roboEyes.update();
+  if (timeForFrame) {
+    drawPomOverlay();
+    display.display();
+  }
+}
+
 // -------- LOOP --------
 
 void loop() {
   server.handleClient();
+  handleTouchSensor();
 
-  // Physical pat-head tap detection (mirrors 400ms web UI window)
-  bool touchNow = digitalRead(TOUCH_PIN);
-  if (touchNow && !touchLastState) {
-    touchTapCount++;
-    touchLastTap = millis();
-  }
-  touchLastState = touchNow;
-  if (touchTapCount > 0 && millis() - touchLastTap >= TOUCH_WINDOW_MS) {
-    enterPetMode(touchTapCount);
-    touchTapCount = 0;
-  }
+  if (currentMode == MODE_CLOCK) { showTime(); return; }
 
-  if (currentMode == MODE_CLOCK) {
-    showTime();
-    return;
-  }
+  handleAutoSleep();
 
-  // Auto sleep: 9pm-7am in auto mode
-  if (currentMode == MODE_AUTO || (currentMode == MODE_SLEEP && autoSleepActive)) {
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-      int h = timeinfo.tm_hour;
-      bool sleepTime = (h >= 21 || h < 7);
-      if (sleepTime && !autoSleepActive) {
-        autoSleepActive = true;
-        currentMode = MODE_SLEEP;
-        clearAmbient();
-      } else if (!sleepTime && autoSleepActive) {
-        autoSleepActive = false;
-        currentMode = MODE_AUTO;
-        lastAutoMood = -1;
-        applyAmbient();
-      }
-    }
-  }
+  if (currentMode == MODE_SLEEP) { drawSleepFace(); return; }
 
-  if (currentMode == MODE_SLEEP) {
-    drawSleepFace();
-    return;
-  }
-
-  // Pet mode state machine
-  if (currentMode == MODE_PET) {
-    if (petAction == PET_HAPPY) {
-      if (millis() >= petTimer1) restoreFromPet();
-    } else if (petAction == PET_LAUGH) {
-      if (millis() >= petTimer1) { roboEyes.setVFlicker(false); restoreFromPet(); }
-    } else if (petAction == PET_CONFUSED) {
-      if (petPhase == 0 && millis() >= petTimer1) {
-        roboEyes.setHFlicker(false);
-        setMoodTracked(ANGRY);
-        petTimer2 = millis() + 3000;
-        petPhase = 1;
-      } else if (petPhase == 1 && millis() >= petTimer2) {
-        restoreFromPet();
-      }
-    }
-  }
-
-  // Pomodoro state machine
-  if (currentMode == MODE_POMODORO_FOCUS || currentMode == MODE_POMODORO_BREAK || currentMode == MODE_POMODORO_OVERTIME) {
-    unsigned long elapsed = millis() - pomodoroStartTime;
-
-    if (currentMode == MODE_POMODORO_FOCUS && elapsed >= POMODORO_FOCUS_MS) {
-      currentMode       = MODE_POMODORO_BREAK;
-      pomodoroStartTime = millis();
-      setMoodTracked(HAPPY);
-      roboEyes.setAutoblinker(ON, 3, 2);
-      roboEyes.anim_laugh();
-    } else if (currentMode == MODE_POMODORO_BREAK && elapsed >= POMODORO_BREAK_MS) {
-      currentMode = MODE_POMODORO_OVERTIME;
-      setMoodTracked(TIRED);
-      roboEyes.setSweat(true);
-    }
-  }
-
-  // Auto mode mood refresh
-  if (currentMode == MODE_AUTO) {
-    int mood = getTimeBasedMood();
-    if (mood != lastAutoMood) {
-      setMoodTracked(mood);
-      lastAutoMood = mood;
-    }
-  }
-
-  // Single frame: check if roboEyes is about to redraw, draw eyes into buffer,
-  // then add the pomodoro overlay, then flush once.
-  bool timeForFrame = (millis() - roboEyes.fpsTimer >= roboEyes.frameInterval);
-  roboEyes.update(); // draws eyes into buffer (no display() call)
-  if (timeForFrame) {
-    drawPomOverlay(); // adds timer strip + progress bar at top if in pom mode
-    display.display(); // single flush per frame
-  }
+  handlePetStateMachine();
+  handlePomodoroStateMachine();
+  handleAutoMood();
+  handleDisplayRender();
 }
