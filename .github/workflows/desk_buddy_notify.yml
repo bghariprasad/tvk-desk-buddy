@@ -5,6 +5,10 @@ on:
     branches: ["**"]
   pull_request:
     types: [closed]
+  pull_request_review:
+    types: [submitted]
+  issue_comment:
+    types: [created]
 
 jobs:
   notify:
@@ -53,3 +57,47 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$PAYLOAD"
           echo "Notified: PR merged — $TITLE"
+
+      - name: Notify on PR approved
+        if: github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          REVIEWER: ${{ github.event.review.user.login }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          DB_SECRET: ${{ secrets.FIREBASE_DB_SECRET }}
+        run: |
+          TITLE=$(echo "$PR_TITLE" | cut -c1-50)
+          PAYLOAD=$(jq -cn \
+            --arg type "pr_approved" \
+            --arg message "$TITLE" \
+            --arg author "$REVIEWER" \
+            --arg repo "$REPO_NAME" \
+            --argjson ts "$(date +%s)" \
+            '{type:$type,message:$message,author:$author,repo:$repo,timestamp:$ts}')
+          curl -s -X PUT \
+            "https://desk-buddy-007-default-rtdb.asia-southeast1.firebasedatabase.app/notifications/latest.json?auth=${DB_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
+          echo "Notified: PR approved — $TITLE by $REVIEWER"
+
+      - name: Notify on PR comment
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request != null
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          DB_SECRET: ${{ secrets.FIREBASE_DB_SECRET }}
+        run: |
+          SNIPPET=$(echo "$COMMENT_BODY" | head -1 | cut -c1-50)
+          PAYLOAD=$(jq -cn \
+            --arg type "pr_comment" \
+            --arg message "$SNIPPET" \
+            --arg author "$COMMENTER" \
+            --arg repo "$REPO_NAME" \
+            --argjson ts "$(date +%s)" \
+            '{type:$type,message:$message,author:$author,repo:$repo,timestamp:$ts}')
+          curl -s -X PUT \
+            "https://desk-buddy-007-default-rtdb.asia-southeast1.firebasedatabase.app/notifications/latest.json?auth=${DB_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD"
+          echo "Notified: PR comment by $COMMENTER"

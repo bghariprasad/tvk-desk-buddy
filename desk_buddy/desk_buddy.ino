@@ -342,14 +342,15 @@ void drawPomOverlay() {
 // -------- GITHUB NOTIFICATION OVERLAY --------
 // Draws a 14px strip at the bottom of the display (y=50..63) over the eyes.
 void drawNotifOverlay() {
-  display.fillRect(0, 50, 128, 14, SSD1306_BLACK);
-  display.drawFastHLine(0, 50, 128, SSD1306_WHITE);
+  // Two lines at top (y=0–17), separator at y=18, eyes fully visible below
+  display.fillRect(0, 0, 128, 19, SSD1306_BLACK);
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 52);
+  display.setCursor(0, 1);
   display.print(notifLine1);
-  display.setCursor(0, 60);
+  display.setCursor(0, 10);
   display.print(notifLine2);
+  display.drawFastHLine(0, 18, 128, SSD1306_WHITE);
 }
 
 // -------- GITHUB NOTIFICATION TRIGGER --------
@@ -366,6 +367,10 @@ void triggerNotification(const char* type, const char* msg) {
 
   if (strcmp(type, "pr_merged") == 0) {
     strncpy(notifLine1, "PR MERGED! :)", 21);
+  } else if (strcmp(type, "pr_approved") == 0) {
+    strncpy(notifLine1, "PR APPROVED! :D", 21);
+  } else if (strcmp(type, "pr_comment") == 0) {
+    strncpy(notifLine1, "PR Comment!", 21);
   } else {
     strncpy(notifLine1, "GIT: New commit!", 21);
   }
