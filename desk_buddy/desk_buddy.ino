@@ -35,7 +35,7 @@ static SemaphoreHandle_t stateMux = NULL;
 #define SPK_DIN   33   // I2S data out → MAX98357A DIN
 #define SPK_PORT  I2S_NUM_1
 #define SPK_SAMPLE_RATE 44100
-#define SPK_VOLUME      0.20f  // 20% — protects 0.5W / 8Ω speaker
+#define SPK_VOLUME      0.40f  // 40% — safe limit for 0.5W / 8Ω speaker
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
