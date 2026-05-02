@@ -148,9 +148,16 @@ unsigned long petTimer1     = 0;
 unsigned long petTimer2     = 0;
 
 // -------- GITHUB NOTIFICATION --------
-char          notifLine1[22]        = "";
-char          notifLine2[22]        = "";
-unsigned long notifExpiry           = 0;
+#define NOTIF_PHASE0_MS  2000   // eyes animate with reaction
+#define NOTIF_PHASE1_MS  3500   // full-screen text
+#define NOTIF_PHASE2_MS  2500   // eyes animate again, then restore
+
+char          notifLabel[22]        = "";  // event type label
+char          notifMsg[51]          = "";  // full message (up to 50 chars)
+char          notifAuthor[22]       = "";  // author name
+int           notifPhase            = 0;   // 0=eyes, 1=fullscreen, 2=eyes
+unsigned long notifPhaseTimer       = 0;
+bool          notifPositive         = true; // true=happy/VFlicker, false=tired/HFlicker
 unsigned long lastSeenTimestamp     = 0;
 Mode          preNotifMode          = MODE_AUTO;
 int           preNotifMood          = TIRED;
@@ -182,8 +189,9 @@ bool inEyesMode() {
 void enterPetMode(int taps) {
   // Dismiss notification on any tap
   if (currentMode == MODE_NOTIFICATION) {
-    currentMode = preNotifMode;
     roboEyes.setVFlicker(false);
+    roboEyes.setHFlicker(false);
+    currentMode = preNotifMode;
     setMoodTracked(preNotifMood);
     if (preNotifAmbient) applyAmbient();
     if (preNotifMode == MODE_AUTO) lastAutoMood = -1;
@@ -339,47 +347,91 @@ void drawPomOverlay() {
   display.fillRect(0, 9, barW, 1, SSD1306_WHITE);
 }
 
-// -------- GITHUB NOTIFICATION OVERLAY --------
-// Draws a 14px strip at the bottom of the display (y=50..63) over the eyes.
-void drawNotifOverlay() {
-  // Two lines at top (y=0–17), separator at y=18, eyes fully visible below
-  display.fillRect(0, 0, 128, 19, SSD1306_BLACK);
+// -------- GITHUB NOTIFICATION FULL SCREEN --------
+
+// Word-wrap: splits text into two lines at a space boundary, max maxLen chars per line.
+void wordWrap(const char* text, char* line1, char* line2, int maxLen) {
+  int len = strlen(text);
+  if (len <= maxLen) {
+    strncpy(line1, text, maxLen); line1[maxLen] = '\0';
+    line2[0] = '\0';
+    return;
+  }
+  // Find last space at or before maxLen to break cleanly
+  int split = maxLen;
+  for (int i = maxLen - 1; i > 0; i--) {
+    if (text[i] == ' ') { split = i; break; }
+  }
+  strncpy(line1, text, split); line1[split] = '\0';
+  const char* rest = text + split;
+  while (*rest == ' ') rest++; // skip leading space on line 2
+  strncpy(line2, rest, maxLen); line2[maxLen] = '\0';
+}
+
+// Phase 1: clears the entire display and shows event info as large text.
+void drawNotifFullScreen() {
+  display.clearDisplay();
+
+  // Inverted header bar
+  display.fillRect(0, 0, 128, 12, SSD1306_WHITE);
+  display.setTextColor(SSD1306_BLACK);
   display.setTextSize(1);
+  display.setCursor(2, 2);
+  display.print(notifLabel);
+
+  // Message — word-wrapped to two lines of 21 chars
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 1);
-  display.print(notifLine1);
-  display.setCursor(0, 10);
-  display.print(notifLine2);
-  display.drawFastHLine(0, 18, 128, SSD1306_WHITE);
+  char msgLine1[22], msgLine2[22];
+  wordWrap(notifMsg, msgLine1, msgLine2, 21);
+
+  display.setCursor(2, 16);
+  display.print(msgLine1);
+  if (msgLine2[0] != '\0') {
+    display.setCursor(2, 26);
+    display.print(msgLine2);
+  }
+
+  // Author
+  display.setCursor(2, 48);
+  display.print("by: ");
+  display.print(notifAuthor);
+
+  display.display();
 }
 
 // -------- GITHUB NOTIFICATION TRIGGER --------
 // Called from poll task while holding stateMux.
-void triggerNotification(const char* type, const char* msg) {
+void triggerNotification(const char* type, const char* msg, const char* author) {
   preNotifMode    = currentMode;
   preNotifMood    = trackedMood;
   preNotifAmbient = ambientActive;
 
-  currentMode = MODE_NOTIFICATION;
+  currentMode   = MODE_NOTIFICATION;
+  notifPhase    = 0;
+  notifPhaseTimer = millis() + NOTIF_PHASE0_MS;
+
+  // Positive events: happy + vertical flicker. Negative (pr_comment): tired + horizontal.
+  notifPositive = (strcmp(type, "pr_comment") != 0);
+
+  if (strcmp(type, "pr_merged") == 0)        strncpy(notifLabel, "PR MERGED!",   21);
+  else if (strcmp(type, "pr_approved") == 0)  strncpy(notifLabel, "PR APPROVED!", 21);
+  else if (strcmp(type, "pr_comment") == 0)   strncpy(notifLabel, "PR Comment",   21);
+  else                                         strncpy(notifLabel, "New Commit!",  21);
+  notifLabel[21] = '\0';
+
+  strncpy(notifMsg, msg, 50);   notifMsg[50] = '\0';
+  strncpy(notifAuthor, author, 21); notifAuthor[21] = '\0';
+
   clearAmbient();
-  setMoodTracked(HAPPY);
-  roboEyes.setVFlicker(true, 5);
-
-  if (strcmp(type, "pr_merged") == 0) {
-    strncpy(notifLine1, "PR MERGED! :)", 21);
-  } else if (strcmp(type, "pr_approved") == 0) {
-    strncpy(notifLine1, "PR APPROVED! :D", 21);
-  } else if (strcmp(type, "pr_comment") == 0) {
-    strncpy(notifLine1, "PR Comment!", 21);
+  if (notifPositive) {
+    setMoodTracked(HAPPY);
+    roboEyes.setVFlicker(true, 5);
   } else {
-    strncpy(notifLine1, "GIT: New commit!", 21);
+    setMoodTracked(TIRED);
+    roboEyes.setHFlicker(true, 20);
   }
-  strncpy(notifLine2, msg, 21);
-  notifLine1[21] = '\0';
-  notifLine2[21] = '\0';
 
-  notifExpiry = millis() + 5000;
-  Serial.printf("[NOTIF] %s — %s\n", notifLine1, notifLine2);
+  Serial.printf("[NOTIF] phase0: %s — %s\n", notifLabel, notifMsg);
 }
 
 // -------- GITHUB POLL (runs in pollTask on Core 0) --------
@@ -408,11 +460,12 @@ void checkGitHubNotifications() {
   if (ts <= lastSeenTimestamp) return;
   lastSeenTimestamp = ts;
 
-  const char* type = doc["type"]    | "commit";
-  const char* msg  = doc["message"] | "New activity";
+  const char* type   = doc["type"]    | "commit";
+  const char* msg    = doc["message"] | "New activity";
+  const char* author = doc["author"]  | "unknown";
 
   if (xSemaphoreTake(stateMux, portMAX_DELAY)) {
-    triggerNotification(type, msg);
+    triggerNotification(type, msg, author);
     xSemaphoreGive(stateMux);
   }
 }
@@ -946,23 +999,58 @@ void loop() {
 
   handleTouchSensor();
 
-  // Auto-dismiss notification after 5 seconds
-  if (currentMode == MODE_NOTIFICATION && millis() >= notifExpiry) {
-    roboEyes.setVFlicker(false);
-    currentMode = preNotifMode;
-    setMoodTracked(preNotifMood);
-    if (preNotifAmbient) applyAmbient();
-    if (preNotifMode == MODE_AUTO) lastAutoMood = -1;
-  }
-
-  // Notification: show excited eyes + text strip at bottom
+  // ---- Notification 3-phase state machine ----
+  // Phase 0 (2s): eyes animate with mood reaction
+  // Phase 1 (3.5s): full-screen text, Pomodoro keeps ticking in background
+  // Phase 2 (2.5s): eyes animate again, then restore previous mode
   if (currentMode == MODE_NOTIFICATION) {
-    bool timeForFrame = (millis() - roboEyes.fpsTimer >= roboEyes.frameInterval);
-    roboEyes.update();
-    if (timeForFrame) {
-      drawNotifOverlay();
-      display.display();
+    unsigned long now = millis();
+
+    if (notifPhase == 0) {
+      bool timeForFrame = (now - roboEyes.fpsTimer >= roboEyes.frameInterval);
+      roboEyes.update();
+      if (timeForFrame) display.display();
+
+      if (now >= notifPhaseTimer) {
+        roboEyes.setVFlicker(false);
+        roboEyes.setHFlicker(false);
+        notifPhase = 1;
+        notifPhaseTimer = now + NOTIF_PHASE1_MS;
+        Serial.println("[NOTIF] phase1: fullscreen");
+      }
+
+    } else if (notifPhase == 1) {
+      drawNotifFullScreen();
+
+      if (now >= notifPhaseTimer) {
+        notifPhase = 2;
+        notifPhaseTimer = now + NOTIF_PHASE2_MS;
+        if (notifPositive) {
+          setMoodTracked(HAPPY);
+          roboEyes.setVFlicker(true, 5);
+        } else {
+          setMoodTracked(TIRED);
+          roboEyes.setHFlicker(true, 20);
+        }
+        Serial.println("[NOTIF] phase2: eyes again");
+      }
+
+    } else {
+      bool timeForFrame = (now - roboEyes.fpsTimer >= roboEyes.frameInterval);
+      roboEyes.update();
+      if (timeForFrame) display.display();
+
+      if (now >= notifPhaseTimer) {
+        roboEyes.setVFlicker(false);
+        roboEyes.setHFlicker(false);
+        currentMode = preNotifMode;
+        setMoodTracked(preNotifMood);
+        if (preNotifAmbient) applyAmbient();
+        if (preNotifMode == MODE_AUTO) lastAutoMood = -1;
+        Serial.println("[NOTIF] restored");
+      }
     }
+
     xSemaphoreGive(stateMux);
     return;
   }
