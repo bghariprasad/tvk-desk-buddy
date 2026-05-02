@@ -212,15 +212,16 @@ void enterPetMode(int taps) {
     return;
   }
 
-  // While sleeping: only double-tap wakes to AUTO; ignore everything else
-  if (currentMode == MODE_SLEEP && !autoSleepActive) {
-    if (taps >= 2) {
-      currentMode  = MODE_AUTO;
-      lastAutoMood = -1;
-      clearAmbient();
-      applyAmbient();
-      lastActivityMs = millis();
-    }
+  // Any tap while sleeping wakes to In Meeting mode
+  if (currentMode == MODE_SLEEP) {
+    currentMode     = MODE_STATUS;
+    autoSleepActive = false;
+    clearAmbient();
+    setMoodTracked(DEFAULT);
+    roboEyes.setCuriosity(true);
+    roboEyes.setIdleMode(ON, 1, 1);
+    roboEyes.setAutoblinker(ON, 4, 2);
+    lastActivityMs = millis();
     return;
   }
 
