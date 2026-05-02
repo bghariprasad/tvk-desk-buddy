@@ -1,12 +1,20 @@
-#include <Adafruit_SSD1306.h>
-#include <FluxGarage_RoboEyes.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
+// FluxGarage_RoboEyes defines bare macros N/E/S/W — must come after all other headers
+#include <Adafruit_SSD1306.h>
+#include <FluxGarage_RoboEyes.h>
 #include <time.h>
 #include <driver/i2s.h>
 
 const char* ssid     = "Veedu";
 const char* password = "Password@123";
+
+// Firebase Realtime Database URL — replace with your project ID
+#define FIREBASE_DB_URL "https://desk-buddy-007-default-rtdb.asia-southeast1.firebasedatabase.app"
+#define GITHUB_POLL_INTERVAL_MS (30UL * 1000)
 
 WebServer server(80);
 static SemaphoreHandle_t stateMux = NULL;
@@ -38,7 +46,8 @@ enum Mode {
   MODE_POMODORO_OVERTIME,
   MODE_CLOCK,
   MODE_PET,
-  MODE_SLEEP
+  MODE_SLEEP,
+  MODE_NOTIFICATION        // GitHub event overlay (auto-dismisses after 5s)
 };
 Mode currentMode = MODE_AUTO;
 
@@ -138,6 +147,15 @@ int           petPhase      = 0;
 unsigned long petTimer1     = 0;
 unsigned long petTimer2     = 0;
 
+// -------- GITHUB NOTIFICATION --------
+char          notifLine1[22]        = "";
+char          notifLine2[22]        = "";
+unsigned long notifExpiry           = 0;
+unsigned long lastSeenTimestamp     = 0;
+Mode          preNotifMode          = MODE_AUTO;
+int           preNotifMood          = TIRED;
+bool          preNotifAmbient       = false;
+
 void restoreFromPet() {
   petAction   = PET_NONE;
   petPhase    = 0;
@@ -162,6 +180,16 @@ bool inEyesMode() {
 }
 
 void enterPetMode(int taps) {
+  // Dismiss notification on any tap
+  if (currentMode == MODE_NOTIFICATION) {
+    currentMode = preNotifMode;
+    roboEyes.setVFlicker(false);
+    setMoodTracked(preNotifMood);
+    if (preNotifAmbient) applyAmbient();
+    if (preNotifMode == MODE_AUTO) lastAutoMood = -1;
+    return;
+  }
+
   if (currentMode == MODE_PET) return; // ignore taps during active reaction
 
   if (taps == 1) { cycleTapMode(); return; }
@@ -309,6 +337,89 @@ void drawPomOverlay() {
   int barW = (int)(128.0f * (float)elapsed / (float)totalMs);
   if (barW > 128) barW = 128;
   display.fillRect(0, 9, barW, 1, SSD1306_WHITE);
+}
+
+// -------- GITHUB NOTIFICATION OVERLAY --------
+// Draws a 14px strip at the bottom of the display (y=50..63) over the eyes.
+void drawNotifOverlay() {
+  display.fillRect(0, 50, 128, 14, SSD1306_BLACK);
+  display.drawFastHLine(0, 50, 128, SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 52);
+  display.print(notifLine1);
+  display.setCursor(0, 60);
+  display.print(notifLine2);
+}
+
+// -------- GITHUB NOTIFICATION TRIGGER --------
+// Called from poll task while holding stateMux.
+void triggerNotification(const char* type, const char* msg) {
+  preNotifMode    = currentMode;
+  preNotifMood    = trackedMood;
+  preNotifAmbient = ambientActive;
+
+  currentMode = MODE_NOTIFICATION;
+  clearAmbient();
+  setMoodTracked(HAPPY);
+  roboEyes.setVFlicker(true, 5);
+
+  if (strcmp(type, "pr_merged") == 0) {
+    strncpy(notifLine1, "PR MERGED! :)", 21);
+  } else {
+    strncpy(notifLine1, "GIT: New commit!", 21);
+  }
+  strncpy(notifLine2, msg, 21);
+  notifLine1[21] = '\0';
+  notifLine2[21] = '\0';
+
+  notifExpiry = millis() + 5000;
+  Serial.printf("[NOTIF] %s — %s\n", notifLine1, notifLine2);
+}
+
+// -------- GITHUB POLL (runs in pollTask on Core 0) --------
+void checkGitHubNotifications() {
+  WiFiClientSecure client;
+  client.setInsecure(); // skip cert verification — replace with setCACert() for production
+
+  HTTPClient http;
+  String url = String(FIREBASE_DB_URL) + "/notifications/latest.json";
+
+  if (!http.begin(client, url)) return;
+  int code = http.GET();
+  if (code != 200) {
+    Serial.printf("[POLL] HTTP %d\n", code);
+    http.end();
+    return;
+  }
+
+  String body = http.getString();
+  http.end();
+
+  StaticJsonDocument<512> doc;
+  if (deserializeJson(doc, body) != DeserializationError::Ok || doc.isNull()) return;
+
+  unsigned long ts = doc["timestamp"].as<unsigned long>();
+  if (ts <= lastSeenTimestamp) return;
+  lastSeenTimestamp = ts;
+
+  const char* type = doc["type"]    | "commit";
+  const char* msg  = doc["message"] | "New activity";
+
+  if (xSemaphoreTake(stateMux, portMAX_DELAY)) {
+    triggerNotification(type, msg);
+    xSemaphoreGive(stateMux);
+  }
+}
+
+void pollTask(void* pv) {
+  vTaskDelay(pdMS_TO_TICKS(15000)); // wait for WiFi + NTP to stabilise after boot
+  for (;;) {
+    if (WiFi.status() == WL_CONNECTED) {
+      checkGitHubNotifications();
+    }
+    vTaskDelay(pdMS_TO_TICKS(GITHUB_POLL_INTERVAL_MS));
+  }
 }
 
 
@@ -680,6 +791,7 @@ void setup() {
 
   stateMux = xSemaphoreCreateMutex();
   xTaskCreatePinnedToCore(wifiTask, "wifi", 4096, NULL, 1, NULL, 0); // Core 0
+  xTaskCreatePinnedToCore(pollTask, "poll", 8192, NULL, 1, NULL, 0); // Core 0
 
   setupMicrophone();
 
@@ -828,6 +940,27 @@ void loop() {
   xSemaphoreTake(stateMux, portMAX_DELAY);
 
   handleTouchSensor();
+
+  // Auto-dismiss notification after 5 seconds
+  if (currentMode == MODE_NOTIFICATION && millis() >= notifExpiry) {
+    roboEyes.setVFlicker(false);
+    currentMode = preNotifMode;
+    setMoodTracked(preNotifMood);
+    if (preNotifAmbient) applyAmbient();
+    if (preNotifMode == MODE_AUTO) lastAutoMood = -1;
+  }
+
+  // Notification: show excited eyes + text strip at bottom
+  if (currentMode == MODE_NOTIFICATION) {
+    bool timeForFrame = (millis() - roboEyes.fpsTimer >= roboEyes.frameInterval);
+    roboEyes.update();
+    if (timeForFrame) {
+      drawNotifOverlay();
+      display.display();
+    }
+    xSemaphoreGive(stateMux);
+    return;
+  }
 
   if (currentMode == MODE_CLOCK) {
     showTime();
