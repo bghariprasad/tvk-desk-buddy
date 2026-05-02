@@ -92,6 +92,10 @@ void clearAmbient() {
   roboEyes.setSweat(false);
 }
 
+// -------- INACTIVITY SLEEP --------
+#define INACTIVITY_SLEEP_MS (10UL * 60 * 1000)  // 10 minutes
+unsigned long lastActivityMs = 0;
+
 // -------- PHYSICAL TOUCH TAP --------
 int           touchTapCount  = 0;
 bool          touchLastState = false;
@@ -132,6 +136,7 @@ void handleTouchSensor() {
   if (touchNow && !touchLastState) {
     touchTapCount++;
     touchLastTap = millis();
+    lastActivityMs = millis();
     Serial.printf("[TOUCH] Rising edge detected — tap #%d\n", touchTapCount);
   }
   if (!touchNow && touchLastState) {
@@ -207,6 +212,18 @@ void enterPetMode(int taps) {
     return;
   }
 
+  // While sleeping: only double-tap wakes to AUTO; ignore everything else
+  if (currentMode == MODE_SLEEP && !autoSleepActive) {
+    if (taps >= 2) {
+      currentMode  = MODE_AUTO;
+      lastAutoMood = -1;
+      clearAmbient();
+      applyAmbient();
+      lastActivityMs = millis();
+    }
+    return;
+  }
+
   if (currentMode == MODE_PET) return; // ignore taps during active reaction
 
   if (taps == 1) { cycleTapMode(); return; }
@@ -251,6 +268,7 @@ void enterPetMode(int taps) {
     petPhase  = 0;
     roboEyes.setHFlicker(true, 20);
     petTimer1 = millis() + 2000;
+    audioRequest = 3; // angry wobble → harsh tone
   }
 }
 
@@ -866,6 +884,7 @@ void setup() {
   setupMicrophone();
   setupSpeaker();
 
+  lastActivityMs = millis();
   roboEyes.anim_laugh();
 }
 
@@ -1010,6 +1029,14 @@ void playRobotSmile() {
   playWobbleTone(1500,  60, 35.0f, 120);  // bright finish
 }
 
+// Angry: rapid wobble while eye H-flickers, then low harsh tones
+void playAngrySound() {
+  playWobbleTone(300, 180, 25.0f, 200);  // aggressive low wobble (matches H-flicker)
+  playWobbleTone(250, 200, 30.0f, 180);  // deeper wobble
+  playTone(180, 200);                     // heavy low growl
+  playTone(150, 300);                     // deeper angry tone
+}
+
 void audioTask(void* pv) {
   for (;;) {
     int8_t req = audioRequest;
@@ -1018,9 +1045,23 @@ void audioTask(void* pv) {
       if      (req ==  1) playPositiveChime();
       else if (req == -1) playNegativeChime();
       else if (req ==  2) playRobotSmile();
+      else if (req ==  3) playAngrySound();
     }
     vTaskDelay(pdMS_TO_TICKS(50));
   }
+}
+
+// -------- INACTIVITY SLEEP --------
+
+void handleInactivitySleep() {
+  if (currentMode == MODE_SLEEP) return;       // already asleep
+  if (autoSleepActive) return;                 // time-based sleep owns it
+  if (inPomodoroMode()) return;                // don't interrupt focus
+  if (millis() - lastActivityMs < INACTIVITY_SLEEP_MS) return;
+
+  currentMode = MODE_SLEEP;
+  clearAmbient();
+  Serial.println("[SLEEP] Inactivity timeout");
 }
 
 // -------- AUTO SLEEP --------
@@ -1189,6 +1230,7 @@ void loop() {
     return;
   }
 
+  handleInactivitySleep();
   handlePetStateMachine();
   handlePomodoroStateMachine();
   handleAutoMood();
