@@ -291,38 +291,14 @@ int getTimeBasedMood() {
 void showTime() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) return;
-
   display.clearDisplay();
+  display.setTextSize(2);
   display.setTextColor(SSD1306_WHITE);
-
-  // Date — "SAT 03 MAY 2026" centred at top
-  char dateBuf[18];
-  strftime(dateBuf, sizeof(dateBuf), "%a %d %b %Y", &timeinfo);
-  for (char* p = dateBuf; *p; p++) *p = toupper(*p);
-  int dateW = strlen(dateBuf) * 6;  // size-1 char = 6px wide
+  display.setCursor(0, 10);
+  display.printf("%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
   display.setTextSize(1);
-  display.setCursor((128 - dateW) / 2, 3);
-  display.print(dateBuf);
-
-  // Separator line
-  display.drawFastHLine(0, 13, 128, SSD1306_WHITE);
-
-  // Big HH:MM — size 3 (18px/char), colon blinks every 500ms
-  bool colonOn = (millis() / 500) % 2 == 0;
-  char timeBuf[6];
-  snprintf(timeBuf, sizeof(timeBuf), "%02d%c%02d",
-           timeinfo.tm_hour, colonOn ? ':' : ' ', timeinfo.tm_min);
-  display.setTextSize(3);               // 5 chars × 18px = 90px → centre x=19
-  display.setCursor((128 - 90) / 2, 19);
-  display.print(timeBuf);
-
-  // Seconds — small, bottom-right
-  char secBuf[5];
-  snprintf(secBuf, sizeof(secBuf), ":%02d", timeinfo.tm_sec);
-  display.setTextSize(1);
-  display.setCursor(128 - (int)strlen(secBuf) * 6, 54);
-  display.print(secBuf);
-
+  display.setCursor(0, 40);
+  display.printf("%02d-%02d-%04d", timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
   display.display();
 }
 
