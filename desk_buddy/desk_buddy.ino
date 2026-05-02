@@ -354,8 +354,8 @@ void drawPomOverlay() {
   display.setTextColor(SSD1306_WHITE);
 
   if (currentMode == MODE_POMODORO_OVERTIME) {
-    display.setCursor(15, 1);
-    display.print("DONE! - REST NOW");
+    display.setCursor(22, 1);
+    display.print("Back to work!");
     return;
   }
 
