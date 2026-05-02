@@ -1,18 +1,19 @@
-#include <Adafruit_SSD1306.h>
-#include <FluxGarage_RoboEyes.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <time.h>
-#include <driver/i2s.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+// FluxGarage_RoboEyes defines bare macros N/E/S/W — must come after all other headers
+#include <Adafruit_SSD1306.h>
+#include <FluxGarage_RoboEyes.h>
+#include <time.h>
+#include <driver/i2s.h>
 
 const char* ssid     = "Veedu";
 const char* password = "Password@123";
 
 // Firebase Realtime Database URL — replace with your project ID
-#define FIREBASE_DB_URL "https://desk-buddy-007-default-rtdb.firebaseio.com"
+#define FIREBASE_DB_URL "https://desk-buddy-007-default-rtdb.asia-southeast1.firebasedatabase.app"
 #define GITHUB_POLL_INTERVAL_MS (30UL * 1000)
 
 WebServer server(80);
