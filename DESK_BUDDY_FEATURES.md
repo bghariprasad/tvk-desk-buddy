@@ -7,7 +7,7 @@
 | Display | SSD1306 OLED 128×64px, I2C (SDA=21, SCL=22, addr=0x3C) |
 | Microphone | INMP441 MEMS, I2S (16kHz, 32-bit, left channel) |
 | Eyes library | FluxGarage RoboEyes v1.1.1 |
-| Connectivity | WiFi (WebServer on port 80) |
+| Connectivity | WiFi (WebServer on port 80), HTTPS polling (Firebase RTDB) |
 
 ### Pin Map
 | GPIO | Role | Type |
@@ -184,6 +184,62 @@ Press **Eyes** on the web UI to return to eye animation (Auto Mode).
 | `TIRED` | Drooping top (inner side) | Sleepy / calm |
 | `ANGRY` | Drooping top (outer side) | Focused / intense |
 | `HAPPY` | Raised bottom | Cheerful |
+
+---
+
+## Feature 7 — GitHub Notifications
+
+The buddy polls Firebase Realtime Database every 30 seconds and displays a notification overlay on the OLED whenever a GitHub event occurs.
+
+### Pipeline
+```
+GitHub event → GitHub Actions → Firebase RTDB REST API → ESP32 polls → OLED notification
+```
+
+### Cloud Setup
+| Component | Detail |
+|---|---|
+| Firebase project | `desk-buddy-007` |
+| RTDB region | `asia-southeast1` |
+| RTDB path | `/notifications/latest` |
+| GitHub secret | `FIREBASE_DB_SECRET` — Firebase database secret |
+
+### Tracked Events
+| GitHub Event | Trigger condition | OLED line 1 | OLED line 2 |
+|---|---|---|---|
+| Push | Any branch | `GIT: New commit!` | Commit message (first line, 21 chars) |
+| PR merged | `pull_request` closed + merged | `PR MERGED! :)` | PR title (21 chars) |
+| PR approved | `pull_request_review` state = approved | `PR APPROVED! :D` | PR title (21 chars) |
+| PR comment | `issue_comment` on a PR | `PR Comment!` | First line of comment (21 chars) |
+
+### OLED Notification Behaviour
+| Property | Detail |
+|---|---|
+| Display area | Bottom 14px strip (y=50–63), overlaid on eyes |
+| Duration | 5 seconds, then restores previous mode |
+| Dismiss early | Single tap on physical touch sensor |
+| Eye reaction | HAPPY mood + vertical flicker for duration |
+| Poll interval | 30 seconds |
+| Boot delay | 15 seconds (waits for WiFi + NTP to stabilise) |
+
+### Required Arduino Libraries
+| Library | Purpose |
+|---|---|
+| `HTTPClient` | Outbound HTTPS polling |
+| `WiFiClientSecure` | TLS for Firebase REST API |
+| `ArduinoJson` | JSON parsing of RTDB response |
+
+> **Include order matters:** `WiFiClientSecure` and `ArduinoJson` must be included **before** `FluxGarage_RoboEyes.h` to avoid macro conflicts (`N`, `E`, `S`, `W` compass defines clash with mbedTLS).
+
+### Testing Without a Real Commit
+Write directly to RTDB via curl to trigger a notification immediately:
+```bash
+curl -X PUT \
+  "https://desk-buddy-007-default-rtdb.asia-southeast1.firebasedatabase.app/notifications/latest.json?auth=YOUR_DB_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"commit","message":"test: hello from curl","author":"you","repo":"TVK","timestamp":'"$(date +%s)"'}'
+```
+Valid `type` values: `commit`, `pr_merged`, `pr_approved`, `pr_comment`.
 
 ---
 
