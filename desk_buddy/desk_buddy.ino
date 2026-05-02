@@ -29,6 +29,14 @@ static SemaphoreHandle_t stateMux = NULL;
 #define MIC_SAMPLE_RATE 16000
 #define MIC_BUFFER_LEN  64
 
+// -------- MAX98357A SPEAKER PINS --------
+#define SPK_BCLK  26   // I2S bit clock
+#define SPK_LRC   27   // I2S left/right clock
+#define SPK_DIN   33   // I2S data out → MAX98357A DIN
+#define SPK_PORT  I2S_NUM_1
+#define SPK_SAMPLE_RATE 44100
+#define SPK_VOLUME      0.20f  // 20% — protects 0.5W / 8Ω speaker
+
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
@@ -159,6 +167,7 @@ int           notifPhase            = 0;   // 0=eyes, 1=fullscreen, 2=eyes
 unsigned long notifPhaseTimer       = 0;
 bool          notifPositive         = true; // true=happy/VFlicker, false=tired/HFlicker
 unsigned long lastSeenTimestamp     = 0;
+volatile int8_t audioRequest        = 0;  // 1=positive chime, -1=negative chime
 Mode          preNotifMode          = MODE_AUTO;
 int           preNotifMood          = TIRED;
 bool          preNotifAmbient       = false;
@@ -431,6 +440,7 @@ void triggerNotification(const char* type, const char* msg, const char* author) 
     roboEyes.setHFlicker(true, 20);
   }
 
+  audioRequest = notifPositive ? 1 : -1;  // wake audioTask
   Serial.printf("[NOTIF] phase0: %s — %s\n", notifLabel, notifMsg);
 }
 
@@ -848,10 +858,12 @@ void setup() {
   server.begin();
 
   stateMux = xSemaphoreCreateMutex();
-  xTaskCreatePinnedToCore(wifiTask, "wifi", 4096, NULL, 1, NULL, 0); // Core 0
-  xTaskCreatePinnedToCore(pollTask, "poll", 8192, NULL, 1, NULL, 0); // Core 0
+  xTaskCreatePinnedToCore(wifiTask,  "wifi",  4096, NULL, 1, NULL, 0); // Core 0
+  xTaskCreatePinnedToCore(pollTask,  "poll",  8192, NULL, 1, NULL, 0); // Core 0
+  xTaskCreatePinnedToCore(audioTask, "audio", 4096, NULL, 1, NULL, 0); // Core 0
 
   setupMicrophone();
+  setupSpeaker();
 
   roboEyes.anim_laugh();
 }
@@ -875,6 +887,7 @@ void setupMicrophone() {
   };
 
   i2s_pin_config_t pins = {
+    .mck_io_num   = I2S_PIN_NO_CHANGE, // INMP441 doesn't need MCLK
     .bck_io_num   = MIC_SCK,
     .ws_io_num    = MIC_WS,
     .data_out_num = I2S_PIN_NO_CHANGE,
@@ -901,6 +914,79 @@ void readMicrophone() {
   }
 
   Serial.printf("[MIC] samples=%d  peak=%d\n", count, peak);
+}
+
+// -------- MAX98357A SPEAKER --------
+
+void setupSpeaker() {
+  i2s_config_t cfg = {
+    .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+    .sample_rate          = SPK_SAMPLE_RATE,
+    .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count        = 8,
+    .dma_buf_len          = 64,
+    .use_apll             = false,
+    .tx_desc_auto_clear   = true,
+    .fixed_mclk           = 0
+  };
+  i2s_pin_config_t pins = {
+    .mck_io_num   = I2S_PIN_NO_CHANGE, // MAX98357A doesn't need MCLK
+    .bck_io_num   = SPK_BCLK,
+    .ws_io_num    = SPK_LRC,
+    .data_out_num = SPK_DIN,
+    .data_in_num  = I2S_PIN_NO_CHANGE
+  };
+  i2s_driver_install(SPK_PORT, &cfg, 0, NULL);
+  i2s_set_pin(SPK_PORT, &pins);
+  Serial.println("[SPK] MAX98357A initialised");
+}
+
+// Plays a sine wave tone at `freq` Hz for `durationMs` ms at SPK_VOLUME.
+void playTone(int freq, int durationMs) {
+  const int amplitude = (int)(32767 * SPK_VOLUME);
+  const int totalSamples = SPK_SAMPLE_RATE * durationMs / 1000;
+  const int chunkFrames = 64;
+  int16_t buf[chunkFrames * 2]; // stereo
+
+  for (int i = 0; i < totalSamples; i += chunkFrames) {
+    int frames = min(chunkFrames, totalSamples - i);
+    for (int j = 0; j < frames; j++) {
+      float t = (float)(i + j) / SPK_SAMPLE_RATE;
+      int16_t s = (int16_t)(amplitude * sinf(2.0f * (float)M_PI * freq * t));
+      buf[j * 2]     = s; // left
+      buf[j * 2 + 1] = s; // right
+    }
+    size_t written;
+    i2s_write(SPK_PORT, buf, frames * 4, &written, portMAX_DELAY);
+  }
+}
+
+// Positive: ascending 3-note chime (commit / PR merged / PR approved)
+void playPositiveChime() {
+  playTone(659,  120);  // E5
+  playTone(880,  120);  // A5
+  playTone(1047, 200);  // C6
+}
+
+// Negative: descending 2-note tone (PR comment)
+void playNegativeChime() {
+  playTone(523, 180);  // C5
+  playTone(392, 250);  // G4
+}
+
+void audioTask(void* pv) {
+  for (;;) {
+    int8_t req = audioRequest;
+    if (req != 0) {
+      audioRequest = 0;
+      if (req > 0) playPositiveChime();
+      else         playNegativeChime();
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
 }
 
 // -------- AUTO SLEEP --------
