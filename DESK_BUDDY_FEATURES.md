@@ -8,18 +8,38 @@
 | Microphone | INMP441 MEMS, I2S (16kHz, 32-bit, left channel) |
 | Eyes library | FluxGarage RoboEyes v1.1.1 |
 | Connectivity | WiFi (WebServer on port 80), HTTPS polling (Firebase RTDB) |
+| Speaker amp | MAX98357A I2S mono amplifier |
+| Speaker | 8Ω 0.5W |
 
 ### Pin Map
 | GPIO | Role | Type |
 |---|---|---|
 | 4 | Touch sensor (pat-head tap) | Digital Input |
-| 14 | INMP441 SCK — I2S bit clock | I2S |
+| 14 | INMP441 SCK — I2S bit clock | I2S (MIC) |
 | 21 | I2C SDA — OLED display | I2C |
 | 22 | I2C SCL — OLED display | I2C |
-| 25 | INMP441 WS — I2S word select | I2S |
-| 32 | INMP441 SD — I2S data in | I2S |
+| 25 | INMP441 WS — I2S word select | I2S (MIC) |
+| 26 | MAX98357A BCLK — I2S bit clock | I2S (SPK) |
+| 27 | MAX98357A LRC — I2S LR clock | I2S (SPK) |
+| 32 | INMP441 SD — I2S data in | I2S (MIC) |
+| 33 | MAX98357A DIN — I2S data out | I2S (SPK) |
 
 > INMP441 L/R pin → GND (left channel). VDD → 3.3V only (not 5V).
+
+### MAX98357A Wiring
+| MAX98357A Pin | ESP32 | Notes |
+|---|---|---|
+| VIN | 5V (VIN) | Use 5V — not 3.3V |
+| GND | GND | — |
+| BCLK | GPIO 26 | I2S bit clock |
+| LRC | GPIO 27 | I2S left/right clock |
+| DIN | GPIO 33 | I2S data |
+| SD | 3.3V | Pull HIGH to enable amp |
+| GAIN | (unconnected) | Floating = 9dB |
+| OUT+ | Speaker + | — |
+| OUT− | Speaker − | — |
+
+> Software volume is set to **20%** (`SPK_VOLUME = 0.20f`) to protect the 0.5W speaker. Do not increase beyond 40% without checking speaker power limits.
 
 ### INMP441 Wiring
 | INMP441 Pin | ESP32 | Notes |
@@ -39,6 +59,16 @@
 | Bit depth | 32-bit |
 | Channel | Left only |
 | DMA buffers | 8 × 64 samples |
+
+### Speaker Config
+| Parameter | Value |
+|---|---|
+| I2S port | I2S_NUM_1 |
+| Sample rate | 44100 Hz |
+| Bit depth | 16-bit |
+| Channel | Stereo (MAX98357A sums to mono) |
+| DMA buffers | 8 × 64 samples |
+| Volume | 20% (`SPK_VOLUME = 0.20f`) |
 
 ---
 
