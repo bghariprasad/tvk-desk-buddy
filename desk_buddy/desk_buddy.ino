@@ -70,6 +70,36 @@ bool          touchLastState = false;
 unsigned long touchLastTap   = 0;
 #define TOUCH_WINDOW_MS 400
 
+// Single-tap cycles through: Clock → Pomodoro → Eyes (auto)
+const Mode TAP_CYCLE[] = { MODE_CLOCK, MODE_POMODORO_FOCUS, MODE_AUTO };
+const int  TAP_CYCLE_LEN = 3;
+int        tapCycleIndex = -1;
+
+void cycleTapMode() {
+  tapCycleIndex = (tapCycleIndex + 1) % TAP_CYCLE_LEN;
+  Mode next = TAP_CYCLE[tapCycleIndex];
+
+  if (next == MODE_CLOCK) {
+    currentMode = MODE_CLOCK;
+    clearAmbient();
+  } else if (next == MODE_POMODORO_FOCUS) {
+    currentMode       = MODE_POMODORO_FOCUS;
+    pomodoroStartTime = millis();
+    clearAmbient();
+    setMoodTracked(ANGRY);
+    roboEyes.setPosition(S);
+    roboEyes.setAutoblinker(ON, 8, 0);
+  } else if (next == MODE_AUTO) {
+    currentMode     = MODE_AUTO;
+    lastAutoMood    = -1;
+    autoSleepActive = false;
+    clearAmbient();
+    applyAmbient();
+  }
+
+  Serial.printf("[TOUCH] Cycle → mode %d (index %d)\n", next, tapCycleIndex);
+}
+
 void handleTouchSensor() {
   bool touchNow = digitalRead(TOUCH_PIN);
   if (touchNow && !touchLastState) {
@@ -111,17 +141,17 @@ void restoreFromPet() {
 }
 
 void enterPetMode(int taps) {
+  if (currentMode == MODE_PET) return; // ignore taps during active reaction
+
+  if (taps == 1) { cycleTapMode(); return; }
+
   prePetMode    = currentMode;
   prePetMood    = trackedMood;
   prePetAmbient = ambientActive;
   currentMode   = MODE_PET;
   clearAmbient();
 
-  if (taps == 1) {
-    petAction = PET_HAPPY;
-    setMoodTracked(HAPPY);
-    petTimer1 = millis() + 3000;
-  } else if (taps == 2) {
+  if (taps == 2) {
     petAction = PET_LAUGH;
     setMoodTracked(HAPPY);
     roboEyes.setVFlicker(true, 5);
