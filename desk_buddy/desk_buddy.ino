@@ -14,7 +14,7 @@ const char* password = "Password@123";
 
 // Firebase Realtime Database URL — replace with your project ID
 #define FIREBASE_DB_URL "https://desk-buddy-007-default-rtdb.asia-southeast1.firebasedatabase.app"
-#define GITHUB_POLL_INTERVAL_MS (30UL * 1000)
+#define GITHUB_POLL_INTERVAL_MS (15UL * 1000)
 
 WebServer server(80);
 static SemaphoreHandle_t stateMux = NULL;
