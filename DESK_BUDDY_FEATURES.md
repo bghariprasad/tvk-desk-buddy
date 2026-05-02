@@ -5,6 +5,7 @@
 |---|---|
 | Board | ESP32 |
 | Display | SSD1306 OLED 128×64px, I2C (SDA=21, SCL=22, addr=0x3C) |
+| Microphone | INMP441 MEMS, I2S (16kHz, 32-bit, left channel) |
 | Eyes library | FluxGarage RoboEyes v1.1.1 |
 | Connectivity | WiFi (WebServer on port 80) |
 
@@ -12,8 +13,32 @@
 | GPIO | Role | Type |
 |---|---|---|
 | 4 | Touch sensor (pat-head tap) | Digital Input |
+| 14 | INMP441 SCK — I2S bit clock | I2S |
 | 21 | I2C SDA — OLED display | I2C |
 | 22 | I2C SCL — OLED display | I2C |
+| 25 | INMP441 WS — I2S word select | I2S |
+| 32 | INMP441 SD — I2S data in | I2S |
+
+> INMP441 L/R pin → GND (left channel). VDD → 3.3V only (not 5V).
+
+### INMP441 Wiring
+| INMP441 Pin | ESP32 | Notes |
+|---|---|---|
+| VDD | 3.3V | Do NOT use 5V |
+| GND | GND | — |
+| L/R | GND | Selects left channel |
+| SCK | GPIO 14 | I2S bit clock |
+| WS | GPIO 25 | I2S word select |
+| SD | GPIO 32 | I2S data in |
+
+### Microphone Config
+| Parameter | Value |
+|---|---|
+| I2S port | I2S_NUM_0 |
+| Sample rate | 16000 Hz |
+| Bit depth | 32-bit |
+| Channel | Left only |
+| DMA buffers | 8 × 64 samples |
 
 ---
 
