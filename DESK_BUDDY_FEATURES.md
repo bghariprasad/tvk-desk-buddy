@@ -8,6 +8,13 @@
 | Eyes library | FluxGarage RoboEyes v1.1.1 |
 | Connectivity | WiFi (WebServer on port 80) |
 
+### Pin Map
+| GPIO | Role | Type |
+|---|---|---|
+| 4 | Touch sensor (pat-head tap) | Digital Input |
+| 21 | I2C SDA — OLED display | I2C |
+| 22 | I2C SCL — OLED display | I2C |
+
 ---
 
 ## Feature 1 — Time-Aware Mood (Auto Mode)
