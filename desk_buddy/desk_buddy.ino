@@ -229,6 +229,7 @@ void enterPetMode(int taps) {
       setMoodTracked(HAPPY);
       roboEyes.setVFlicker(true, 5);
       petTimer1 = millis() + 3000;
+      audioRequest = 2; // robot smile sound
     }
     return;
   }
@@ -977,13 +978,46 @@ void playNegativeChime() {
   playTone(392, 250);  // G4
 }
 
+// Robot smile: wobbling frequency-modulated chirps — R2-D2 happy style
+// freq(t) = baseFreq + wobbleDepth * sin(2π * wobbleRate * t)
+void playWobbleTone(int baseFreq, int wobbleDepth, float wobbleRate, int durationMs) {
+  const int amplitude   = (int)(32767 * SPK_VOLUME);
+  const int totalSamples = SPK_SAMPLE_RATE * durationMs / 1000;
+  const int chunkFrames  = 64;
+  int16_t buf[chunkFrames * 2];
+
+  for (int i = 0; i < totalSamples; i += chunkFrames) {
+    int frames = min(chunkFrames, totalSamples - i);
+    for (int j = 0; j < frames; j++) {
+      float t    = (float)(i + j) / SPK_SAMPLE_RATE;
+      float freq = baseFreq + wobbleDepth * sinf(2.0f * (float)M_PI * wobbleRate * t);
+      // Integrate phase properly to avoid clicks at wobble boundary
+      float phase = 2.0f * (float)M_PI * (baseFreq * t
+                    + (wobbleDepth / wobbleRate) * (1.0f - cosf(2.0f * (float)M_PI * wobbleRate * t)) / (2.0f * (float)M_PI));
+      int16_t s = (int16_t)(amplitude * sinf(phase));
+      buf[j * 2]     = s;
+      buf[j * 2 + 1] = s;
+    }
+    size_t written;
+    i2s_write(SPK_PORT, buf, frames * 4, &written, portMAX_DELAY);
+  }
+}
+
+void playRobotSmile() {
+  playWobbleTone(600,  120, 18.0f, 140);  // low warble
+  playWobbleTone(900,  100, 22.0f, 130);  // mid warble
+  playWobbleTone(1200,  80, 28.0f, 160);  // high chirp
+  playWobbleTone(1500,  60, 35.0f, 120);  // bright finish
+}
+
 void audioTask(void* pv) {
   for (;;) {
     int8_t req = audioRequest;
     if (req != 0) {
       audioRequest = 0;
-      if (req > 0) playPositiveChime();
-      else         playNegativeChime();
+      if      (req ==  1) playPositiveChime();
+      else if (req == -1) playNegativeChime();
+      else if (req ==  2) playRobotSmile();
     }
     vTaskDelay(pdMS_TO_TICKS(50));
   }
