@@ -884,6 +884,7 @@ void setup() {
 
   setupMicrophone();
   setupSpeaker();
+  playBootSound();
 
   lastActivityMs = millis();
   roboEyes.anim_laugh();
@@ -1038,6 +1039,31 @@ void playAngrySound() {
   playTone(150, 300);                     // deeper angry tone
 }
 
+// Pomodoro focus ended → break time: descending bell tones
+void playPomodoroFocusEnd() {
+  playTone(1047, 150);  // C6
+  playTone(880,  150);  // A5
+  playTone(784,  150);  // G5
+  playTone(659,  300);  // E5 — settle
+}
+
+// Pomodoro break ended → overtime: urgent ascending alarm
+void playPomodoroBreakEnd() {
+  for (int i = 0; i < 3; i++) {
+    playTone(880,  120);
+    playTone(1047, 120);
+  }
+  playTone(1319, 300);  // E6 — final sharp note
+}
+
+// Boot jingle: cheerful rising fanfare
+void playBootSound() {
+  playTone(523,  80);   // C5
+  playTone(659,  80);   // E5
+  playTone(784,  80);   // G5
+  playWobbleTone(1047, 60, 12.0f, 250);  // C6 with shimmer
+}
+
 void audioTask(void* pv) {
   for (;;) {
     int8_t req = audioRequest;
@@ -1047,6 +1073,8 @@ void audioTask(void* pv) {
       else if (req == -1) playNegativeChime();
       else if (req ==  2) playRobotSmile();
       else if (req ==  3) playAngrySound();
+      else if (req ==  4) playPomodoroFocusEnd();
+      else if (req ==  5) playPomodoroBreakEnd();
     }
     vTaskDelay(pdMS_TO_TICKS(50));
   }
@@ -1124,10 +1152,12 @@ void handlePomodoroStateMachine() {
     setMoodTracked(HAPPY);
     roboEyes.setAutoblinker(ON, 3, 2);
     roboEyes.anim_laugh();
+    audioRequest = 4;  // focus-end bell
   } else if (currentMode == MODE_POMODORO_BREAK && elapsed >= POMODORO_BREAK_MS) {
     currentMode = MODE_POMODORO_OVERTIME;
     setMoodTracked(TIRED);
     roboEyes.setSweat(true);
+    audioRequest = 5;  // break-end alarm
   }
 }
 
