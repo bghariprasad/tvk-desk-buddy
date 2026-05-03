@@ -5,7 +5,6 @@
 |---|---|
 | Board | ESP32 |
 | Display | SSD1306 OLED 128×64px, I2C (SDA=21, SCL=22, addr=0x3C) |
-| Microphone | INMP441 MEMS, I2S (16kHz, 32-bit, left channel) |
 | Eyes library | FluxGarage RoboEyes v1.1.1 |
 | Connectivity | WiFi (WebServer on port 80), HTTPS polling (Firebase RTDB) |
 | Speaker amp | MAX98357A I2S mono amplifier |
@@ -15,16 +14,11 @@
 | GPIO | Role | Type |
 |---|---|---|
 | 4 | Touch sensor (pat-head tap) | Digital Input |
-| 14 | INMP441 SCK — I2S bit clock | I2S (MIC) |
 | 21 | I2C SDA — OLED display | I2C |
 | 22 | I2C SCL — OLED display | I2C |
-| 25 | INMP441 WS — I2S word select | I2S (MIC) |
 | 26 | MAX98357A BCLK — I2S bit clock | I2S (SPK) |
 | 27 | MAX98357A LRC — I2S LR clock | I2S (SPK) |
-| 32 | INMP441 SD — I2S data in | I2S (MIC) |
 | 33 | MAX98357A DIN — I2S data out | I2S (SPK) |
-
-> INMP441 L/R pin → GND (left channel). VDD → 3.3V only (not 5V).
 
 ### MAX98357A Wiring
 | MAX98357A Pin | ESP32 | Notes |
@@ -39,26 +33,7 @@
 | OUT+ | Speaker + | — |
 | OUT− | Speaker − | — |
 
-> Software volume is set to **20%** (`SPK_VOLUME = 0.20f`) to protect the 0.5W speaker. Do not increase beyond 40% without checking speaker power limits.
-
-### INMP441 Wiring
-| INMP441 Pin | ESP32 | Notes |
-|---|---|---|
-| VDD | 3.3V | Do NOT use 5V |
-| GND | GND | — |
-| L/R | GND | Selects left channel |
-| SCK | GPIO 14 | I2S bit clock |
-| WS | GPIO 25 | I2S word select |
-| SD | GPIO 32 | I2S data in |
-
-### Microphone Config
-| Parameter | Value |
-|---|---|
-| I2S port | I2S_NUM_0 |
-| Sample rate | 16000 Hz |
-| Bit depth | 32-bit |
-| Channel | Left only |
-| DMA buffers | 8 × 64 samples |
+> Software volume is set to **25%** (`SPK_VOLUME = 0.25f`) to protect the 0.5W speaker. Do not increase beyond 40% without checking speaker power limits.
 
 ### Speaker Config
 | Parameter | Value |
@@ -68,7 +43,7 @@
 | Bit depth | 16-bit |
 | Channel | Stereo (MAX98357A sums to mono) |
 | DMA buffers | 8 × 64 samples |
-| Volume | 20% (`SPK_VOLUME = 0.20f`) |
+| Volume | 25% (`SPK_VOLUME = 0.25f`) |
 
 ---
 

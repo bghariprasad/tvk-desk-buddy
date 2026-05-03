@@ -21,13 +21,6 @@ static SemaphoreHandle_t stateMux = NULL;
 
 #define TOUCH_PIN 4
 
-// -------- INMP441 MICROPHONE PINS --------
-#define MIC_SCK  14   // I2S bit clock
-#define MIC_WS   25   // I2S word select (LR clock)
-#define MIC_SD   32   // I2S data in
-#define MIC_PORT I2S_NUM_0
-#define MIC_SAMPLE_RATE 16000
-#define MIC_BUFFER_LEN  64
 
 // -------- MAX98357A SPEAKER PINS --------
 #define SPK_BCLK  26   // I2S bit clock
@@ -35,7 +28,7 @@ static SemaphoreHandle_t stateMux = NULL;
 #define SPK_DIN   33   // I2S data out → MAX98357A DIN
 #define SPK_PORT  I2S_NUM_1
 #define SPK_SAMPLE_RATE 44100
-#define SPK_VOLUME      0.40f  // 40% — safe limit for 0.5W / 8Ω speaker
+#define SPK_VOLUME      0.25f  // 25% — comfortable volume for 0.5W / 8Ω speaker
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -882,7 +875,6 @@ void setup() {
   xTaskCreatePinnedToCore(pollTask,  "poll",  8192, NULL, 1, NULL, 0); // Core 0
   xTaskCreatePinnedToCore(audioTask, "audio", 4096, NULL, 1, NULL, 0); // Core 0
 
-  setupMicrophone();
   setupSpeaker();
   playBootSound();
 
@@ -890,53 +882,6 @@ void setup() {
   roboEyes.anim_laugh();
 }
 
-
-// -------- MICROPHONE (INMP441) --------
-
-void setupMicrophone() {
-  i2s_config_t cfg = {
-    .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate          = MIC_SAMPLE_RATE,
-    .bits_per_sample      = I2S_BITS_PER_SAMPLE_32BIT,
-    .channel_format       = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count        = 8,
-    .dma_buf_len          = MIC_BUFFER_LEN,
-    .use_apll             = false,
-    .tx_desc_auto_clear   = false,
-    .fixed_mclk           = 0
-  };
-
-  i2s_pin_config_t pins = {
-    .mck_io_num   = I2S_PIN_NO_CHANGE, // INMP441 doesn't need MCLK
-    .bck_io_num   = MIC_SCK,
-    .ws_io_num    = MIC_WS,
-    .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num  = MIC_SD
-  };
-
-  i2s_driver_install(MIC_PORT, &cfg, 0, NULL);
-  i2s_set_pin(MIC_PORT, &pins);
-  Serial.println("[MIC] INMP441 initialised");
-}
-
-void readMicrophone() {
-  int32_t samples[MIC_BUFFER_LEN];
-  size_t  bytesRead = 0;
-
-  i2s_read(MIC_PORT, samples, sizeof(samples), &bytesRead, 0); // non-blocking
-  if (bytesRead == 0) return;
-
-  int count = bytesRead / sizeof(int32_t);
-  int32_t peak = 0;
-  for (int i = 0; i < count; i++) {
-    int32_t val = abs(samples[i] >> 8); // shift 32-bit to 24-bit range
-    if (val > peak) peak = val;
-  }
-
-  Serial.printf("[MIC] samples=%d  peak=%d\n", count, peak);
-}
 
 // -------- MAX98357A SPEAKER --------
 
