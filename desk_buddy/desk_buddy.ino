@@ -9,8 +9,11 @@
 #include <time.h>
 #include <driver/i2s.h>
 
-const char* ssid     = "Veedu";
-const char* password = "Password@123";
+// const char* ssid     = "Veedu";
+// const char* password = "Password@123";
+
+const char* ssid     = "ACV-Auctions";
+const char* password = "FerrariStradale@26";
 
 // Firebase Realtime Database URL — replace with your project ID
 #define FIREBASE_DB_URL "https://desk-buddy-007-default-rtdb.asia-southeast1.firebasedatabase.app"
