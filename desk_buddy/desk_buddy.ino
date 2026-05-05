@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <SPIFFS.h>
 // FluxGarage_RoboEyes defines bare macros N/E/S/W — must come after all other headers
 #include <Adafruit_SSD1306.h>
 #include <FluxGarage_RoboEyes.h>
@@ -1004,12 +1005,41 @@ void playPomodoroBreakEnd() {
   playTone(1319, 300);  // E6 — final sharp note
 }
 
-// Boot jingle: cheerful rising fanfare
+// Boot sound: streams hello.wav from SPIFFS through I2S
+// WAV is 16-bit mono 44100 Hz — matches SPK_SAMPLE_RATE, so no resampling needed.
 void playBootSound() {
-  playTone(523,  80);   // C5
-  playTone(659,  80);   // E5
-  playTone(784,  80);   // G5
-  playWobbleTone(1047, 60, 12.0f, 250);  // C6 with shimmer
+  if (!SPIFFS.begin(true)) {
+    Serial.println("[BOOT] SPIFFS mount failed — skipping boot sound");
+    return;
+  }
+  File f = SPIFFS.open("/hello.wav", "r");
+  if (!f) {
+    Serial.println("[BOOT] hello.wav not found — skipping boot sound");
+    return;
+  }
+
+  // Skip 44-byte standard WAV header
+  f.seek(44);
+
+  const int chunkFrames = 64;
+  int16_t buf[chunkFrames * 2]; // stereo output (duplicate mono to both channels)
+  uint8_t raw[chunkFrames * 2]; // 16-bit mono samples from file
+
+  while (f.available()) {
+    int bytes = f.read(raw, sizeof(raw));
+    int frames = bytes / 2;
+    for (int i = 0; i < frames; i++) {
+      int16_t s = (int16_t)(raw[i * 2] | (raw[i * 2 + 1] << 8));
+      s = (int16_t)(s * SPK_VOLUME);
+      buf[i * 2]     = s;
+      buf[i * 2 + 1] = s;
+    }
+    size_t written;
+    i2s_write(SPK_PORT, buf, frames * 4, &written, portMAX_DELAY);
+  }
+
+  f.close();
+  SPIFFS.end();
 }
 
 void audioTask(void* pv) {
