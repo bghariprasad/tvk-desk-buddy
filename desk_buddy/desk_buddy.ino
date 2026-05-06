@@ -3,7 +3,6 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
-#include <SPIFFS.h>
 // FluxGarage_RoboEyes defines bare macros N/E/S/W — must come after all other headers
 #include <Adafruit_SSD1306.h>
 #include <FluxGarage_RoboEyes.h>
@@ -51,6 +50,7 @@ enum Mode {
   MODE_POMODORO_OVERTIME,
   MODE_CLOCK,
   MODE_PET,
+  MODE_SLEEP_TRANSITION,   // eyes slowly close before sleep
   MODE_SLEEP,
   MODE_NOTIFICATION        // GitHub event overlay (auto-dismisses after 5s)
 };
@@ -90,8 +90,17 @@ void clearAmbient() {
 }
 
 // -------- INACTIVITY SLEEP --------
-#define INACTIVITY_SLEEP_MS (10UL * 60 * 1000)  // 10 minutes
-unsigned long lastActivityMs = 0;
+#define INACTIVITY_SLEEP_MS   (10UL * 60 * 1000)  // 10 minutes
+#define SLEEP_TRANSITION_MS   1500
+unsigned long lastActivityMs    = 0;
+unsigned long sleepTransStart   = 0;
+
+void enterSleep() {
+  currentMode     = MODE_SLEEP_TRANSITION;
+  sleepTransStart = millis();
+  clearAmbient();
+  setMoodTracked(TIRED);
+}
 
 // -------- PHYSICAL TOUCH TAP --------
 int           touchTapCount  = 0;
@@ -181,6 +190,7 @@ void restoreFromPet() {
   roboEyes.setVFlicker(false);
   roboEyes.setHFlicker(false);
   roboEyes.setSweat(false);
+  roboEyes.setPosition(DEFAULT);
   setMoodTracked(prePetMood);
   if (prePetAmbient) applyAmbient();
   if (prePetMode == MODE_AUTO) lastAutoMood = -1;
@@ -209,8 +219,8 @@ void enterPetMode(int taps) {
     return;
   }
 
-  // Any tap while sleeping wakes to In Meeting mode
-  if (currentMode == MODE_SLEEP) {
+  // Any tap while sleeping (or transitioning) wakes to In Meeting mode
+  if (currentMode == MODE_SLEEP || currentMode == MODE_SLEEP_TRANSITION) {
     currentMode     = MODE_STATUS;
     autoSleepActive = false;
     clearAmbient();
@@ -241,6 +251,7 @@ void enterPetMode(int taps) {
       prePetMode = currentMode; prePetMood = trackedMood; prePetAmbient = ambientActive;
       currentMode = MODE_PET; clearAmbient();
       petAction = PET_LAUGH;
+      roboEyes.setPosition(DEFAULT);
       setMoodTracked(HAPPY);
       roboEyes.setVFlicker(true, 5);
       petTimer1 = millis() + 3000;
@@ -264,6 +275,7 @@ void enterPetMode(int taps) {
     currentMode = MODE_PET; clearAmbient();
     petAction = PET_CONFUSED;
     petPhase  = 0;
+    roboEyes.setPosition(DEFAULT);
     roboEyes.setHFlicker(true, 20);
     petTimer1 = millis() + 2000;
     audioRequest = 3; // angry wobble → harsh tone
@@ -542,14 +554,6 @@ void handleRoot() {
     }
     #petBtn:active { background: #2a2a2a; transform: scale(0.97); }
     #petFeedback { min-height: 1.4em; font-size: 0.85em; color: #0af; margin-top: 6px; }
-    #t2Btn {
-      width: 100%; max-width: 320px; padding: 18px; font-size: 1.2em;
-      background: #1a1a1a; border: 2px dashed #555; border-radius: 16px;
-      cursor: pointer; margin: 0 auto; display: block; transition: all 0.1s; user-select: none;
-    }
-    #t2Btn:active { background: #2a2a2a; transform: scale(0.97); }
-    #t2Btn.holding { border-color: #f80; background: #221500; }
-    #t2Feedback { min-height: 1.4em; font-size: 0.85em; color: #0af; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -559,21 +563,11 @@ void handleRoot() {
   <button id="petBtn" onclick="petTap()">Pat Head</button>
   <div id="petFeedback"></div>
 
-  <h3>Touch 2</h3>
-  <button id="t2Btn"
-    onmousedown="t2Start()" ontouchstart="t2Start(event)"
-    onmouseup="t2End()"     ontouchend="t2End(event)"
-    onmouseleave="t2Cancel()">Hold or Tap</button>
-  <div id="t2Feedback"></div>
-
-  <h3>Status</h3>
+  <h3>Clock</h3>
   <div class="grid">
-    <button id="btn-available" onclick="setStatus('available')">Available</button>
-    <button id="btn-busy"      onclick="setStatus('busy')">Busy</button>
-    <button id="btn-meeting"   onclick="setStatus('meeting')">In Meeting</button>
-    <button id="btn-away"      onclick="setStatus('away')">Away</button>
-    <button id="btn-sleep"     onclick="setSleep()">Sleep</button>
-    <button class="full" id="btn-auto" onclick="setStatus('auto')" style="grid-column:span 2;">Auto Mode</button>
+    <button onclick="fetch('/clock')">Clock</button>
+    <button onclick="fetch('/eyes')">Eyes</button>
+    <button onclick="fetch('/sleep')" style="grid-column:span 2;">Sleep</button>
   </div>
 
   <h3>Pomodoro</h3>
@@ -583,12 +577,6 @@ void handleRoot() {
   <div class="grid">
     <button id="btn-pom-start" onclick="pomStart()">Start Focus</button>
     <button onclick="pomReset()">Reset</button>
-  </div>
-
-  <h3>Display</h3>
-  <div class="grid" style="margin-top:10px;">
-    <button onclick="fetch('/clock')">Clock</button>
-    <button onclick="fetch('/eyes')">Eyes</button>
   </div>
 
 <script>
@@ -606,51 +594,6 @@ void handleRoot() {
       setTimeout(() => { document.getElementById('petFeedback').textContent = ''; }, 2000);
     }, 400);
   }
-
-  // ---- Status ----
-  function setStatus(s) {
-    fetch('/status?v=' + s);
-    document.querySelectorAll('button[id^=btn-]').forEach(b => b.classList.remove('active'));
-    const el = document.getElementById('btn-' + s);
-    if (el) el.classList.add('active');
-  }
-
-  function setSleep() {
-    fetch('/sleep');
-    document.querySelectorAll('button[id^=btn-]').forEach(b => b.classList.remove('active'));
-    document.getElementById('btn-sleep').classList.add('active');
-  }
-
-  // ---- Touch 2 ----
-  let t2Timer = null, t2Long = false;
-  const T2_HOLD = 800;
-
-  function t2Start(e) { if(e) e.preventDefault();
-    t2Long = false;
-    document.getElementById('t2Btn').classList.add('holding');
-    t2Timer = setTimeout(() => {
-      t2Long = true;
-      document.getElementById('t2Btn').classList.remove('holding');
-      fetch('/touch2?action=longpress');
-      const fb = document.getElementById('t2Feedback');
-      fb.textContent = 'Pomodoro reset!';
-      setTimeout(() => fb.textContent = '', 2000);
-    }, T2_HOLD);
-  }
-
-  function t2End(e) { if(e) e.preventDefault();
-    clearTimeout(t2Timer);
-    document.getElementById('t2Btn').classList.remove('holding');
-    if (!t2Long) {
-      fetch('/touch2?action=tap');
-      const fb = document.getElementById('t2Feedback');
-      fb.textContent = 'Switched!';
-      setTimeout(() => fb.textContent = '', 1000);
-    }
-    t2Long = false;
-  }
-
-  function t2Cancel() { clearTimeout(t2Timer); document.getElementById('t2Btn').classList.remove('holding'); t2Long = false; }
 
   // ---- Pomodoro ----
   let pomInterval = null, pomTotal = 0, pomRemaining = 0, pomPhase = 'idle';
@@ -770,8 +713,7 @@ void handleEyes() {
 }
 
 void handleSleep() {
-  currentMode = MODE_SLEEP;
-  clearAmbient();
+  enterSleep();
   server.send(200, "text/plain", "OK");
 }
 
@@ -1005,41 +947,12 @@ void playPomodoroBreakEnd() {
   playTone(1319, 300);  // E6 — final sharp note
 }
 
-// Boot sound: streams hello.wav from SPIFFS through I2S
-// WAV is 16-bit mono 44100 Hz — matches SPK_SAMPLE_RATE, so no resampling needed.
+// Boot jingle: cheerful rising fanfare
 void playBootSound() {
-  if (!SPIFFS.begin(true)) {
-    Serial.println("[BOOT] SPIFFS mount failed — skipping boot sound");
-    return;
-  }
-  File f = SPIFFS.open("/hello.wav", "r");
-  if (!f) {
-    Serial.println("[BOOT] hello.wav not found — skipping boot sound");
-    return;
-  }
-
-  // Skip 44-byte standard WAV header
-  f.seek(44);
-
-  const int chunkFrames = 64;
-  int16_t buf[chunkFrames * 2]; // stereo output (duplicate mono to both channels)
-  uint8_t raw[chunkFrames * 2]; // 16-bit mono samples from file
-
-  while (f.available()) {
-    int bytes = f.read(raw, sizeof(raw));
-    int frames = bytes / 2;
-    for (int i = 0; i < frames; i++) {
-      int16_t s = (int16_t)(raw[i * 2] | (raw[i * 2 + 1] << 8));
-      s = (int16_t)(s * SPK_VOLUME);
-      buf[i * 2]     = s;
-      buf[i * 2 + 1] = s;
-    }
-    size_t written;
-    i2s_write(SPK_PORT, buf, frames * 4, &written, portMAX_DELAY);
-  }
-
-  f.close();
-  SPIFFS.end();
+  playTone(523,  80);   // C5
+  playTone(659,  80);   // E5
+  playTone(784,  80);   // G5
+  playWobbleTone(1047, 60, 12.0f, 250);  // C6 with shimmer
 }
 
 void audioTask(void* pv) {
@@ -1061,20 +974,19 @@ void audioTask(void* pv) {
 // -------- INACTIVITY SLEEP --------
 
 void handleInactivitySleep() {
-  if (currentMode == MODE_SLEEP) return;       // already asleep
-  if (autoSleepActive) return;                 // time-based sleep owns it
-  if (inPomodoroMode()) return;                // don't interrupt focus
+  if (currentMode == MODE_SLEEP || currentMode == MODE_SLEEP_TRANSITION) return;
+  if (autoSleepActive) return;
+  if (inPomodoroMode()) return;
   if (millis() - lastActivityMs < INACTIVITY_SLEEP_MS) return;
 
-  currentMode = MODE_SLEEP;
-  clearAmbient();
+  enterSleep();
   Serial.println("[SLEEP] Inactivity timeout");
 }
 
 // -------- AUTO SLEEP --------
 
 void handleAutoSleep() {
-  if (currentMode != MODE_AUTO && !(currentMode == MODE_SLEEP && autoSleepActive)) return;
+  if (currentMode != MODE_AUTO && !((currentMode == MODE_SLEEP || currentMode == MODE_SLEEP_TRANSITION) && autoSleepActive)) return;
 
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) return;
@@ -1084,8 +996,7 @@ void handleAutoSleep() {
 
   if (sleepTime && !autoSleepActive) {
     autoSleepActive = true;
-    currentMode = MODE_SLEEP;
-    clearAmbient();
+    enterSleep();
   } else if (!sleepTime && autoSleepActive) {
     autoSleepActive = false;
     currentMode = MODE_AUTO;
@@ -1232,6 +1143,28 @@ void loop() {
   }
 
   handleAutoSleep();
+
+  if (currentMode == MODE_SLEEP_TRANSITION) {
+    float t = (float)(millis() - sleepTransStart) / (float)SLEEP_TRANSITION_MS;
+    if (t >= 1.0f) {
+      roboEyes.eyeLheightCurrent = roboEyes.eyeLheightDefault;
+      roboEyes.eyeRheightCurrent = roboEyes.eyeRheightDefault;
+      roboEyes.eyeLheightNext    = roboEyes.eyeLheightDefault;
+      roboEyes.eyeRheightNext    = roboEyes.eyeRheightDefault;
+      currentMode = MODE_SLEEP;
+    } else {
+      int h = max(1, (int)(roboEyes.eyeLheightDefault * (1.0f - t)));
+      roboEyes.eyeLheightCurrent = h;
+      roboEyes.eyeRheightCurrent = h;
+      roboEyes.eyeLheightNext    = h;
+      roboEyes.eyeRheightNext    = h;
+      bool timeForFrame = (millis() - roboEyes.fpsTimer >= roboEyes.frameInterval);
+      roboEyes.update();
+      if (timeForFrame) display.display();
+    }
+    xSemaphoreGive(stateMux);
+    return;
+  }
 
   if (currentMode == MODE_SLEEP) {
     drawSleepFace();

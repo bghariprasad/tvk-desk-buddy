@@ -9,7 +9,6 @@
 | Connectivity | WiFi (WebServer on port 80), HTTPS polling (Firebase RTDB) |
 | Speaker amp | MAX98357A I2S mono amplifier |
 | Speaker | 8Ω 0.5W |
-| Storage | SPIFFS (boot audio) |
 
 ### Pin Map
 | Pin | Role | Type |
@@ -271,22 +270,13 @@ All sounds are played through the MAX98357A via I2S on a dedicated FreeRTOS task
 
 | Trigger | Sound | Description |
 |---|---|---|
-| Boot | `hello.wav` (SPIFFS) | WAV file streamed from flash |
+| Boot | Rising fanfare | C5 → E5 → G5 → C6 (with shimmer) |
 | Positive notification | Positive chime | Ascending 3-note: E5 → A5 → C6 |
 | Negative notification (`pr_comment`) | Negative chime | Descending 2-note: C5 → G4 |
 | 2-tap pet (laugh) | Robot smile | FM-wobble chirps, R2-D2 style |
 | 3+-tap pet (confused) | Angry growl | Low wobble tones + heavy bass |
 | Pomodoro focus ends | Focus-end bell | Descending bell: C6 → A5 → G5 → E5 |
 | Pomodoro break ends | Break-end alarm | 3× double beep → E6 sharp |
-
-### Boot Audio (SPIFFS)
-`hello.wav` must be uploaded to the ESP32 filesystem separately using the Arduino **ESP32 Sketch Data Upload** tool. File lives in `desk_buddy/data/hello.wav`.
-
-| Property | Value |
-|---|---|
-| Format | 16-bit PCM WAV |
-| Sample rate | 44100 Hz (matches I2S config — no resampling) |
-| Channels | Mono (duplicated to stereo on output) |
 
 ---
 
@@ -337,12 +327,11 @@ All sounds are played through the MAX98357A via I2S on a dedicated FreeRTOS task
 | `HTTPClient` | Outbound HTTPS polling to Firebase |
 | `WiFiClientSecure` | TLS for Firebase REST API |
 | `ArduinoJson` | JSON parsing of RTDB response |
-| `SPIFFS` | Filesystem for boot WAV |
 | `Adafruit_SSD1306` | OLED display driver |
 | `FluxGarage_RoboEyes` | Animated eye expressions |
 | `driver/i2s` | I2S audio output |
 
-> **Include order matters:** `WiFiClientSecure`, `ArduinoJson`, and `SPIFFS` must be included **before** `FluxGarage_RoboEyes.h` to avoid macro conflicts (`N`, `E`, `S`, `W` compass defines clash with mbedTLS).
+> **Include order matters:** `WiFiClientSecure` and `ArduinoJson` must be included **before** `FluxGarage_RoboEyes.h` to avoid macro conflicts (`N`, `E`, `S`, `W` compass defines clash with mbedTLS).
 
 ---
 
@@ -355,6 +344,6 @@ All sounds are played through the MAX98357A via I2S on a dedicated FreeRTOS task
 5. Web server starts on port 80
 6. FreeRTOS tasks launched: `wifiTask`, `pollTask`, `audioTask` (all Core 0)
 7. Speaker initialised (MAX98357A via I2S)
-8. `hello.wav` streamed from SPIFFS — boot greeting plays
+8. Boot jingle plays (C5 → E5 → G5 → C6 fanfare)
 9. `anim_laugh()` plays on OLED
 10. Auto Mode begins (Tired mood until first time-tick)
