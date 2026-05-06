@@ -31,7 +31,7 @@ static SemaphoreHandle_t stateMux = NULL;
 #define SPK_DIN   33   // I2S data out → MAX98357A DIN
 #define SPK_PORT  I2S_NUM_1
 #define SPK_SAMPLE_RATE 44100
-#define SPK_VOLUME      0.25f  // 25% — comfortable volume for 0.5W / 8Ω speaker
+#define SPK_VOLUME      0.40f  // 40% — comfortable volume for 0.5W / 8Ω speaker
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -579,6 +579,15 @@ void handleRoot() {
     <button onclick="pomReset()">Reset</button>
   </div>
 
+  <h3>Mood</h3>
+  <div class="grid">
+    <button id="mood-happy"   onclick="setMood('happy')">😊 Happy</button>
+    <button id="mood-tired"   onclick="setMood('tired')">😴 Tired</button>
+    <button id="mood-angry"   onclick="setMood('angry')">😠 Angry</button>
+    <button id="mood-default" onclick="setMood('default')">😐 Default</button>
+    <button id="mood-roam" onclick="setRoam()" style="grid-column:span 2;">👀 Roam</button>
+  </div>
+
 <script>
   // ---- Pet ----
   let tapCount = 0, tapTimer = null;
@@ -593,6 +602,19 @@ void handleRoot() {
       tapCount = 0;
       setTimeout(() => { document.getElementById('petFeedback').textContent = ''; }, 2000);
     }, 400);
+  }
+
+  // ---- Mood ----
+  function setMood(m) {
+    fetch('/mood?v=' + m);
+    document.querySelectorAll('[id^=mood-]').forEach(b => b.classList.remove('active'));
+    document.getElementById('mood-' + m).classList.add('active');
+  }
+
+  function setRoam() {
+    fetch('/roam');
+    document.querySelectorAll('[id^=mood-]').forEach(b => b.classList.remove('active'));
+    document.getElementById('mood-roam').classList.add('active');
   }
 
   // ---- Pomodoro ----
@@ -758,6 +780,25 @@ void handleTouch2() {
 
 
 
+void handleMood() {
+  String v = server.arg("v");
+  int mood = DEFAULT;
+  if      (v == "happy")   mood = HAPPY;
+  else if (v == "tired")   mood = TIRED;
+  else if (v == "angry")   mood = ANGRY;
+  else if (v == "default") mood = DEFAULT;
+  currentMode = MODE_STATUS;
+  clearAmbient();
+  setMoodTracked(mood);
+  roboEyes.setPosition(DEFAULT);
+  server.send(200, "text/plain", "OK");
+}
+
+void handleRoam() {
+  applyAmbient();
+  server.send(200, "text/plain", "OK");
+}
+
 // -------- WIFI TASK (Core 0) --------
 
 void wifiTask(void* pv) {
@@ -813,6 +854,8 @@ void setup() {
   server.on("/clock",    handleClock);
   server.on("/eyes",     handleEyes);
   server.on("/sleep",    handleSleep);
+  server.on("/mood",     handleMood);
+  server.on("/roam",     handleRoam);
   server.on("/touch2",   handleTouch2);
   server.begin();
 
@@ -854,7 +897,7 @@ void setupSpeaker() {
   };
   i2s_driver_install(SPK_PORT, &cfg, 0, NULL);
   i2s_set_pin(SPK_PORT, &pins);
-  Serial.println("[SPK] MAX98357A initialised");
+  // Serial.println("[SPK] MAX98357A initialised");
 }
 
 // Plays a sine wave tone at `freq` Hz for `durationMs` ms at SPK_VOLUME.

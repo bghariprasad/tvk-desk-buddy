@@ -36,7 +36,7 @@
 | OUT+ | Speaker + | — |
 | OUT− | Speaker − | — |
 
-> Software volume is set to **25%** (`SPK_VOLUME = 0.25f`) to protect the 0.5W speaker.
+> Software volume is set to **40%** (`SPK_VOLUME = 0.40f`) to protect the 0.5W speaker.
 
 ### Speaker Config
 | Parameter | Value |
@@ -46,7 +46,7 @@
 | Bit depth | 16-bit |
 | Channel | Stereo output (mono source duplicated to both channels) |
 | DMA buffers | 8 × 64 samples |
-| Volume | 25% (`SPK_VOLUME = 0.25f`) |
+| Volume | 40% (`SPK_VOLUME = 0.40f`) |
 
 ---
 
